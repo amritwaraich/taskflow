@@ -1,62 +1,74 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { createClient } from '@/lib/supabase/client'
-import { Circle, CheckCircle, Clock } from 'lucide-react'
-import { format, addDays, isSameDay, startOfDay } from 'date-fns'
+import { useState, useEffect, useCallback } from 'react'
+import { CheckCircle, ChevronRight } from 'lucide-react'
+import { format, addDays, isToday, isTomorrow, isThisWeek, startOfWeek, endOfWeek, parseISO, isSameDay } from 'date-fns'
+import { useAppStore } from '@/store/tasks'
+import { TaskItem } from '@/components/tasks/TaskItem'
+import { TaskDetailModal } from '@/components/tasks/TaskDetailModal'
+import type { Task } from '@/types'
 
 export default function UpcomingPage() {
-  const [tasksByDate, setTasksByDate] = useState<Record<string, any[]>>({})
+  const { upcomingTasks, fetchUpcomingTasks, user } = useAppStore()
   const [loading, setLoading] = useState(true)
-  const supabase = createClient()
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null)
+  const [selectedDay, setSelectedDay] = useState<string | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
-    const fetchTasks = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-
-      const startDate = startOfDay(new Date())
-      const endDate = addDays(startDate, 7)
-
-      const { data: tasks } = await supabase
-        .from('tasks')
-        .select('*, project:projects(name, color, icon)')
-        .eq('user_id', user.id)
-        .eq('is_completed', false)
-        .gte('due_date', startDate.toISOString())
-        .lte('due_date', endDate.toISOString())
-        .order('due_date')
-
-      // Group by date
-      const grouped: Record<string, any[]> = {}
-      ;(tasks || []).forEach((task: any) => {
-        const dateKey = format(new Date(task.due_date), 'yyyy-MM-dd')
-        if (!grouped[dateKey]) grouped[dateKey] = []
-        grouped[dateKey].push(task)
-      })
-
-      setTasksByDate(grouped)
-      setLoading(false)
+    if (user) {
+      fetchUpcomingTasks(user.id).then(() => setLoading(false))
     }
-    fetchTasks()
-  }, [])
+  }, [user, fetchUpcomingTasks])
 
-  const toggleComplete = async (task: any) => {
-    await supabase
-      .from('tasks')
-      .update({ is_completed: true, completed_at: new Date().toISOString() })
-      .eq('id', task.id)
+  const handleRefresh = useCallback(() => {
+    if (user) {
+      fetchUpcomingTasks(user.id)
+      setRefreshKey((k) => k + 1)
+    }
+  }, [user, fetchUpcomingTasks])
+
+  // Group tasks by day
+  const groupTasksByDay = () => {
+    const groups: Record<string, Task[]> = {}
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+
+    const tomorrow = addDays(today, 1)
+    const nextWeekStart = startOfWeek(addDays(today, 7))
+    const nextWeekEnd = endOfWeek(addDays(today, 7))
+
+    upcomingTasks.forEach((task) => {
+      if (!task.due_date) return
+      const date = parseISO(task.due_date)
+      const key = format(date, 'yyyy-MM-dd')
+
+      if (!groups[key]) {
+        groups[key] = []
+      }
+      groups[key].push(task)
+    })
+
+    return groups
   }
 
-  const days = Array.from({ length: 7 }, (_, i) => {
-    const date = addDays(new Date(), i)
-    return {
-      date,
-      key: format(date, 'yyyy-MM-dd'),
-      label: i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : format(date, 'EEEE'),
-      fullLabel: format(date, 'EEEE, MMMM d'),
-    }
-  })
+  const taskGroups = groupTasksByDay()
+
+  // Get unique days
+  const days = Object.keys(taskGroups).sort()
+
+  const formatDayHeader = (dateStr: string) => {
+    const date = parseISO(dateStr)
+    if (isToday(date)) return 'Today'
+    if (isTomorrow(date)) return 'Tomorrow'
+    if (isThisWeek(date)) return format(date, 'EEEE')
+    return format(date, 'EEE, MMM d')
+  }
+
+  const isSelectedDay = (dateStr: string) => {
+    if (!selectedDay) return false
+    return selectedDay === dateStr
+  }
 
   return (
     <div className="max-w-3xl mx-auto p-8">
@@ -65,56 +77,80 @@ export default function UpcomingPage() {
         <p className="text-gray-500">Next 7 days</p>
       </div>
 
+      {/* Day filter pills */}
+      <div className="flex flex-wrap gap-2 mb-6 pb-6 border-b border-gray-200">
+        <button
+          onClick={() => setSelectedDay(null)}
+          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+            !selectedDay
+              ? 'bg-violet-100 text-violet-700'
+              : 'text-gray-600 hover:bg-gray-100'
+          }`}
+        >
+          All
+        </button>
+        {days.map((day) => (
+          <button
+            key={day}
+            onClick={() => setSelectedDay(isSelectedDay(day) ? null : day)}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition flex items-center gap-1 ${
+              isSelectedDay(day)
+                ? 'bg-violet-100 text-violet-700'
+                : 'text-gray-600 hover:bg-gray-100'
+            }`}
+          >
+            {formatDayHeader(day)}
+            <span className="text-xs opacity-60">{taskGroups[day].length}</span>
+          </button>
+        ))}
+      </div>
+
       {loading ? (
         <div className="text-center py-12 text-gray-500">Loading...</div>
-      ) : (
-        <div className="space-y-8">
-          {days.map(({ date, key, label, fullLabel }) => {
-            const tasks = tasksByDate[key] || []
-            return (
-              <div key={key}>
-                <h2 className="text-sm font-semibold text-gray-500 mb-3 flex items-center gap-2">
-                  <span>{label}</span>
-                  <span className="text-gray-300">•</span>
-                  <span className="font-normal">{fullLabel}</span>
-                </h2>
-                {tasks.length === 0 ? (
-                  <p className="text-sm text-gray-400 pl-4">No tasks</p>
-                ) : (
-                  <div className="space-y-2">
-                    {tasks.map((task) => (
-                      <div
-                        key={task.id}
-                        className="flex items-center gap-3 p-3 rounded-xl bg-white border border-gray-100 hover:border-gray-200 transition"
-                      >
-                        <button
-                          onClick={() => toggleComplete(task)}
-                          className="text-gray-400 hover:text-violet-600 flex-shrink-0"
-                        >
-                          <Circle className="w-5 h-5" />
-                        </button>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-gray-900">{task.content}</p>
-                          {task.project && (
-                            <span className="text-xs text-gray-500">
-                              {task.project.icon} {task.project.name}
-                            </span>
-                          )}
-                        </div>
-                        {task.due_date && (
-                          <span className="text-xs text-gray-500 flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            {format(new Date(task.due_date), 'h:mm a')}
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )
-          })}
+      ) : upcomingTasks.length === 0 ? (
+        <div className="text-center py-12">
+          <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <CheckCircle className="w-8 h-8 text-gray-400" />
+          </div>
+          <h3 className="text-lg font-medium text-gray-900 mb-1">No upcoming tasks</h3>
+          <p className="text-gray-500">Press Cmd+K to add tasks with due dates</p>
         </div>
+      ) : (
+        <div key={`upcoming-${refreshKey}`} className="space-y-6">
+          {days
+            .filter((day) => !selectedDay || isSelectedDay(day))
+            .map((day) => (
+              <div key={day}>
+                <h3 className="text-sm font-semibold text-gray-500 mb-3 flex items-center gap-2">
+                  {formatDayHeader(day)}
+                  <ChevronRight className="w-4 h-4 opacity-50" />
+                  <span className="font-normal text-gray-400">
+                    {format(parseISO(day), 'MMMM d')}
+                  </span>
+                </h3>
+                <div className="space-y-2">
+                  {taskGroups[day].map((task) => (
+                    <TaskItem
+                      key={task.id}
+                      task={task}
+                      depth={0}
+                      onUpdate={handleRefresh}
+                      onTaskClick={setSelectedTask}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+        </div>
+      )}
+
+      {/* Task Detail Modal */}
+      {selectedTask && (
+        <TaskDetailModal
+          task={selectedTask}
+          onClose={() => setSelectedTask(null)}
+          onUpdate={handleRefresh}
+        />
       )}
     </div>
   )

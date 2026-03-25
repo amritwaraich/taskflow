@@ -1,146 +1,272 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { createClient } from '@/lib/supabase/client'
-import { Plus, Tag, Edit2, Trash2, Check } from 'lucide-react'
-
-const PRESET_COLORS = [
-  '#EF4444', '#F97316', '#EAB308', '#22C55E', '#14B8A6',
-  '#3B82F6', '#8B5CF6', '#EC4899', '#6B7280', '#1F2937',
-]
+import { Plus, Edit2, Trash2, Loader2, Tag } from 'lucide-react'
+import { useAppStore } from '@/store/tasks'
+import { createLabel, updateLabel, deleteLabel } from '@/lib/api/labels'
+import { ColorPicker } from '@/components/ui/ColorPicker'
+import type { Label } from '@/types'
 
 export default function LabelsPage() {
-  const [labels, setLabels] = useState<any[]>([])
+  const { labels, fetchLabels, addLabel, updateLabel: updateLabelInStore, removeLabel, user } = useAppStore()
   const [loading, setLoading] = useState(true)
-  const [newLabelName, setNewLabelName] = useState('')
-  const [newLabelColor, setNewLabelColor] = useState('#8B5CF6')
-  const [showAddForm, setShowAddForm] = useState(false)
-  const supabase = createClient()
+  const [showCreate, setShowCreate] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [name, setName] = useState('')
+  const [color, setColor] = useState('#8B5CF6')
+  const [saving, setSaving] = useState(false)
+  const [step, setStep] = useState<'name' | 'color'>('name')
 
   useEffect(() => {
-    const fetchLabels = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-
-      const { data: labels } = await supabase
-        .from('labels')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('name')
-
-      setLabels(labels || [])
-      setLoading(false)
+    if (user) {
+      fetchLabels(user.id).then(() => setLoading(false))
     }
-    fetchLabels()
-  }, [])
+  }, [user, fetchLabels])
 
-  const addLabel = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!newLabelName.trim()) return
+  const handleCreate = async () => {
+    if (!name.trim() || !user) return
 
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
+    setSaving(true)
+    const { data } = await createLabel({
+      name: name.trim(),
+      color,
+      user_id: user.id,
+    })
+    if (data) {
+      addLabel(data)
+      setShowCreate(false)
+      setName('')
+      setColor('#8B5CF6')
+      setStep('name')
+    }
+    setSaving(false)
+  }
 
-    const { data: label } = await supabase
-      .from('labels')
-      .insert({
-        user_id: user.id,
-        name: newLabelName,
-        color: newLabelColor,
-      })
-      .select()
-      .single()
+  const handleUpdate = async (id: string) => {
+    if (!name.trim()) return
 
-    if (label) {
-      setLabels([...labels, label])
-      setNewLabelName('')
-      setNewLabelColor('#8B5CF6')
-      setShowAddForm(false)
+    setSaving(true)
+    const { data } = await updateLabel(id, { name: name.trim(), color })
+    if (data) {
+      updateLabelInStore(id, data)
+    }
+    setEditingId(null)
+    setName('')
+    setColor('#8B5CF6')
+    setStep('name')
+    setSaving(false)
+  }
+
+  const handleDelete = async (id: string) => {
+    if (confirm('Delete this label? It will be removed from all tasks.')) {
+      await deleteLabel(id)
+      removeLabel(id)
     }
   }
 
-  const deleteLabel = async (labelId: string) => {
-    await supabase.from('labels').delete().eq('id', labelId)
-    setLabels(labels.filter(l => l.id !== labelId))
+  const startEdit = (label: Label) => {
+    setEditingId(label.id)
+    setName(label.name)
+    setColor(label.color)
+    setStep('name')
   }
 
   return (
-    <div className="max-w-3xl mx-auto p-8">
+    <div className="max-w-2xl mx-auto p-8">
+      {/* Header */}
       <div className="flex items-center justify-between mb-8">
-        <h1 className="text-2xl font-bold text-gray-900">Labels</h1>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Labels</h1>
+          <p className="text-gray-500">{labels.length} labels</p>
+        </div>
         <button
-          onClick={() => setShowAddForm(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 transition"
+          onClick={() => setShowCreate(true)}
+          className="flex items-center gap-2 px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition"
         >
           <Plus className="w-4 h-4" />
-          Add Label
+          New Label
         </button>
       </div>
 
-      {showAddForm && (
-        <form onSubmit={addLabel} className="bg-white rounded-xl border border-gray-200 p-4 mb-6">
-          <div className="flex items-center gap-4">
-            <div className="flex-1">
-              <input
-                type="text"
-                value={newLabelName}
-                onChange={(e) => setNewLabelName(e.target.value)}
-                placeholder="Label name..."
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-violet-500 outline-none"
-                autoFocus
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              {PRESET_COLORS.map((color) => (
-                <button
-                  key={color}
-                  type="button"
-                  onClick={() => setNewLabelColor(color)}
-                  className={`w-6 h-6 rounded-full transition ${
-                    newLabelColor === color ? 'ring-2 ring-offset-2 ring-gray-400' : ''
-                  }`}
-                  style={{ backgroundColor: color }}
-                />
-              ))}
-            </div>
-            <button
-              type="submit"
-              className="px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 transition"
-            >
-              <Check className="w-4 h-4" />
-            </button>
-          </div>
-        </form>
-      )}
-
+      {/* Labels List */}
       {loading ? (
         <div className="text-center py-12 text-gray-500">Loading...</div>
-      ) : labels.length === 0 ? (
-        <div className="text-center py-12">
-          <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <Tag className="w-8 h-8 text-gray-400" />
+      ) : labels.length === 0 && !showCreate ? (
+        <div className="text-center py-16">
+          <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Tag className="w-10 h-10 text-gray-400" />
           </div>
           <h3 className="text-lg font-medium text-gray-900 mb-1">No labels yet</h3>
-          <p className="text-gray-500">Create labels to organize your tasks</p>
+          <p className="text-gray-500 mb-4">Create labels to organize your tasks</p>
+          <button
+            onClick={() => setShowCreate(true)}
+            className="px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition"
+          >
+            <Plus className="w-4 h-4 inline mr-2" />
+            Create Label
+          </button>
         </div>
       ) : (
         <div className="space-y-2">
+          {/* Create new */}
+          {showCreate && (
+            <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
+              {step === 'name' && (
+                <div className="space-y-3">
+                  <input
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Label name..."
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 outline-none focus:border-violet-300 focus:ring-2 focus:ring-violet-100"
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && name.trim()) setStep('color')
+                      if (e.key === 'Escape') {
+                        setShowCreate(false)
+                        setName('')
+                      }
+                    }}
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setStep('color')}
+                      disabled={!name.trim()}
+                      className="px-3 py-1.5 text-sm bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 transition"
+                    >
+                      Next
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowCreate(false)
+                        setName('')
+                      }}
+                      className="px-3 py-1.5 text-sm text-gray-500 hover:bg-gray-100 rounded-lg transition"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {step === 'color' && (
+                <div className="space-y-3">
+                  <p className="text-sm font-medium text-gray-700">Pick a color</p>
+                  <ColorPicker value={color} onChange={setColor} />
+                  <div className="flex gap-2">
+                    {saving ? (
+                      <Loader2 className="px-3 py-1.5 text-violet-600 animate-spin" />
+                    ) : (
+                      <button
+                        onClick={handleCreate}
+                        className="px-3 py-1.5 text-sm bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition"
+                      >
+                        Create
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setStep('name')}
+                      className="px-3 py-1.5 text-sm text-gray-500 hover:bg-gray-100 rounded-lg transition"
+                    >
+                      Back
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Labels */}
           {labels.map((label) => (
             <div
               key={label.id}
-              className="group flex items-center gap-3 p-3 rounded-xl bg-white border border-gray-100 hover:border-gray-200 transition"
+              className="bg-white rounded-xl border border-gray-200 p-4 hover:border-gray-300 transition"
             >
-              <div
-                className="w-4 h-4 rounded-full"
-                style={{ backgroundColor: label.color }}
-              />
-              <span className="flex-1 text-gray-900">{label.name}</span>
-              <button
-                onClick={() => deleteLabel(label.id)}
-                className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 transition"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
+              {editingId === label.id ? (
+                <div className="space-y-3">
+                  {step === 'name' && (
+                    <div className="space-y-3">
+                      <input
+                        type="text"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 outline-none focus:border-violet-300 focus:ring-2 focus:ring-violet-100"
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && name.trim()) setStep('color')
+                          if (e.key === 'Escape') {
+                            setEditingId(null)
+                            setName('')
+                          }
+                        }}
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setStep('color')}
+                          disabled={!name.trim()}
+                          className="px-3 py-1.5 text-sm bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 transition"
+                        >
+                          Next
+                        </button>
+                        <button
+                          onClick={() => {
+                            setEditingId(null)
+                            setName('')
+                          }}
+                          className="px-3 py-1.5 text-sm text-gray-500 hover:bg-gray-100 rounded-lg transition"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {step === 'color' && (
+                    <div className="space-y-3">
+                      <p className="text-sm font-medium text-gray-700">Pick a color</p>
+                      <ColorPicker value={color} onChange={setColor} />
+                      <div className="flex gap-2">
+                        {saving ? (
+                          <Loader2 className="px-3 py-1.5 text-violet-600 animate-spin" />
+                        ) : (
+                          <button
+                            onClick={() => handleUpdate(label.id)}
+                            className="px-3 py-1.5 text-sm bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition"
+                          >
+                            Save
+                          </button>
+                        )}
+                        <button
+                          onClick={() => setStep('name')}
+                          className="px-3 py-1.5 text-sm text-gray-500 hover:bg-gray-100 rounded-lg transition"
+                        >
+                          Back
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="flex items-center gap-3">
+                  <span
+                    className="w-4 h-4 rounded-full"
+                    style={{ backgroundColor: label.color }}
+                  />
+                  <span className="flex-1 font-medium text-gray-900">{label.name}</span>
+                  <button
+                    onClick={() => startEdit(label)}
+                    className="p-2 rounded-lg text-gray-400 hover:text-violet-600 hover:bg-violet-50 transition"
+                  >
+                    <Edit2 className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => handleDelete(label.id)}
+                    className="p-2 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
             </div>
           ))}
         </div>

@@ -222,4 +222,4 @@ CREATE TRIGGER on_auth_user_created
 -- STORAGE BUCKET FOR ATTACHMENTS
 -- =====================================================
 INSERT INTO storage.buckets (id, name, public) VALUES ('attachments', 'attachments', false);
-CREATE POLICY "attachments_own" ON storage.objects FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "attachments_own" ON storage.objects FOR ALL USING (auth.uid()::text = owner_id);

@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import {
   Inbox,
@@ -14,66 +14,53 @@ import {
   Settings,
   LogOut,
   ChevronDown,
-  Folder,
-  ChevronRight,
   Loader2,
-  Sun,
-  Moon,
+  Search,
+  Command,
 } from 'lucide-react'
-
-const sidebarItems = [
-  { href: '/app/inbox', icon: Inbox, label: 'Inbox' },
-  { href: '/app/today', icon: Clock, label: 'Today' },
-  { href: '/app/upcoming', icon: Calendar, label: 'Upcoming' },
-]
+import { ProjectList } from '@/components/projects/ProjectList'
+import { QuickAddModal } from '@/components/tasks/QuickAddModal'
+import { LabelDot } from '@/components/ui/ColorPicker'
+import { useAppStore } from '@/store/tasks'
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const [loading, setLoading] = useState(true)
-  const [user, setUser] = useState<any>(null)
-  const [profile, setProfile] = useState<any>(null)
   const [showUserMenu, setShowUserMenu] = useState(false)
-  const [projects, setProjects] = useState<any[]>([])
+  const [showLabels, setShowLabels] = useState(false)
+  const {
+    user,
+    profile,
+    labels,
+    projects,
+    setUser,
+    setProfile,
+    setProjects,
+    setLabels,
+    init,
+    setShowQuickAdd,
+    showQuickAdd,
+  } = useAppStore()
   const supabase = createClient()
 
   useEffect(() => {
-    const getUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user) {
-        setUser(user)
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', user.id)
-          .single()
-        setProfile(profile)
-      }
+    const initApp = async () => {
+      await init()
       setLoading(false)
     }
-    getUser()
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null)
-    })
-
-    return () => subscription.unsubscribe()
+    initApp()
   }, [])
 
   useEffect(() => {
-    if (user) {
-      const fetchProjects = async () => {
-        const { data } = await supabase
-          .from('projects')
-          .select('*')
-          .eq('user_id', user.id)
-          .eq('is_archived', false)
-          .order('created_at')
-          .limit(10)
-        setProjects(data || [])
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault()
+        setShowQuickAdd(true)
       }
-      fetchProjects()
     }
-  }, [user])
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [setShowQuickAdd])
 
   const handleSignOut = async () => {
     await supabase.auth.signOut()
@@ -87,6 +74,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </div>
     )
   }
+
+  const sidebarItems = [
+    { href: '/app/inbox', icon: Inbox, label: 'Inbox' },
+    { href: '/app/today', icon: Clock, label: 'Today' },
+    { href: '/app/upcoming', icon: Calendar, label: 'Upcoming' },
+  ]
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
@@ -102,6 +95,22 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </div>
             <span className="font-bold text-gray-900">TaskFlow</span>
           </Link>
+        </div>
+
+        {/* Quick Add Button */}
+        <div className="p-3">
+          <button
+            onClick={() => setShowQuickAdd(true)}
+            className="flex items-center justify-between w-full px-3 py-2 rounded-lg border border-dashed border-gray-300 text-gray-500 hover:border-violet-300 hover:text-violet-600 transition text-sm"
+          >
+            <span className="flex items-center gap-2">
+              <Plus className="w-4 h-4" />
+              Quick Add
+            </span>
+            <kbd className="flex items-center gap-0.5 px-1.5 py-0.5 bg-gray-100 rounded text-xs font-mono text-gray-500">
+              <Command className="w-3 h-3" />K
+            </kbd>
+          </button>
         </div>
 
         {/* Main nav */}
@@ -128,38 +137,41 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="pt-4">
             <div className="flex items-center justify-between px-3 mb-2">
               <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Projects</span>
-              <button className="text-gray-400 hover:text-gray-600">
-                <Plus className="w-4 h-4" />
-              </button>
             </div>
-            {projects.map((project) => (
-              <Link
-                key={project.id}
-                href={`/app/projects/${project.id}`}
-                className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition ${
-                  pathname === `/app/projects/${project.id}`
-                    ? 'bg-violet-50 text-violet-700'
-                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                }`}
-              >
-                <span>{project.icon || '📁'}</span>
-                <span className="truncate">{project.name}</span>
-              </Link>
-            ))}
-            {projects.length === 0 && (
-              <p className="px-3 py-2 text-sm text-gray-400">No projects yet</p>
+            <ProjectList />
+          </div>
+
+          {/* Labels */}
+          <div className="pt-4">
+            <button
+              onClick={() => setShowLabels(!showLabels)}
+              className="flex items-center gap-3 px-3 py-2 w-full rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition"
+            >
+              <Tag className="w-5 h-5" />
+              <span className="flex-1 text-left">Labels</span>
+              <ChevronDown className={`w-4 h-4 transition ${showLabels ? 'rotate-180' : ''}`} />
+            </button>
+            {showLabels && (
+              <div className="ml-4 mt-1 space-y-1">
+                {labels.map((label) => (
+                  <Link
+                    key={label.id}
+                    href={`/app/labels?filter=${label.id}`}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded text-sm text-gray-600 hover:bg-gray-50 transition"
+                  >
+                    <LabelDot color={label.color} />
+                    <span className="truncate">{label.name}</span>
+                  </Link>
+                ))}
+                {labels.length === 0 && (
+                  <p className="px-3 py-1.5 text-xs text-gray-400">No labels yet</p>
+                )}
+              </div>
             )}
           </div>
 
-          {/* Labels & Filters */}
+          {/* Filters */}
           <div className="pt-4 space-y-1">
-            <Link
-              href="/app/labels"
-              className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition"
-            >
-              <Tag className="w-5 h-5" />
-              Labels
-            </Link>
             <Link
               href="/app/filters"
               className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition"
@@ -192,10 +204,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </button>
 
             {showUserMenu && (
-              <div className="absolute bottom-full left-0 right-0 mb-2 bg-white rounded-lg border border-gray-200 shadow-lg overflow-hidden">
+              <div className="absolute bottom-full left-0 right-0 mb-2 bg-white rounded-lg border border-gray-200 shadow-lg overflow-hidden z-50">
                 <Link
                   href="/app/settings"
                   className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition"
+                  onClick={() => setShowUserMenu(false)}
                 >
                   <Settings className="w-4 h-4" />
                   Settings
@@ -217,6 +230,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <main className="flex-1 min-h-screen">
         {children}
       </main>
+
+      {/* Quick Add Modal */}
+      {showQuickAdd && <QuickAddModal onClose={() => setShowQuickAdd(false)} />}
     </div>
   )
 }
