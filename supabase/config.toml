@@ -1,0 +1,3 @@
+[auth]
+site_url = "https://taskflow-nine-woad.vercel.app"
+additional_redirect_urls = ["https://taskflow-nine-woad.vercel.app"]
